@@ -12,38 +12,48 @@ import base64
 from src.state import MemeState
 from src.config import get_model
 from src.llm import get_client
+from src.meme_fetcher import meme_list_for_prompt
 
 COMBINED_SCHEMA = {
     "type": "object",
     "properties": {
-        "pua_type": {"type": "string"},   # "职场PUA" / "情感PUA" / "道德绑架" / "无"
-        "blocked": {"type": "boolean"},   # 违法/极端内容时为 true
+        "pua_type": {"type": "string"},    # "职场PUA" / "情感PUA" / "道德绑架" / "无"
+        "blocked": {"type": "boolean"},    # 违法/极端内容时为 true
+        "template_id": {"type": "string"}, # 从梗图列表中选一个 id
         "captions": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "slot": {"type": "string"},   # "top" / "bottom"
-                    "text": {"type": "string"},   # ≤15字
+                    "slot": {"type": "string"},  # "top" / "bottom"
+                    "text": {"type": "string"},  # ≤15字
                 },
                 "required": ["slot", "text"],
                 "additionalProperties": False,
             },
         },
     },
-    "required": ["pua_type", "blocked", "captions"],
+    "required": ["pua_type", "blocked", "template_id", "captions"],
     "additionalProperties": False,
 }
 
-SYSTEM_PROMPT = (
-    "你是分析聊天截图并生成反PUA梗图文案的助手。\n"
-    "1. 看懂截图，识别是否存在PUA/职场压迫/道德绑架等行为，填写 pua_type。\n"
-    "2. 若内容涉及违法/未成年人/极端暴力，设 blocked=true，captions 留空数组。\n"
-    "3. 否则生成两条梗图文案（每条≤15字，简短有力）：\n"
-    "   - slot=top：概括对方的问题行为\n"
-    "   - slot=bottom：机智的回怼\n"
-    "只输出符合给定 JSON schema 的结果，不要多余文字。"
-)
+
+def _build_system_prompt() -> str:
+    meme_list = meme_list_for_prompt()
+    return (
+        "你是分析聊天截图并生成反PUA梗图文案的助手。\n"
+        "1. 看懂截图，识别是否存在PUA/职场压迫/道德绑架等行为，填写 pua_type。\n"
+        "2. 若内容涉及违法/未成年人/极端暴力，设 blocked=true，template_id 和 captions 留空。\n"
+        "3. 否则：\n"
+        "   a. 从下方梗图列表中选一个最贴合当前情绪和回怼语义的模板，填写 template_id。\n"
+        "   b. 针对截图里的具体内容，生成两条有杀伤力的配文（每条≤15字）：\n"
+        "      - 配文必须紧扣截图中的实际言行，不要泛泛而谈\n"
+        "      - 目标是让看到的人觉得又准又狠又好笑\n"
+        "      - slot=top 和 slot=bottom 形成对比或反转，具体形式不限\n\n"
+        "梗图列表（格式：id|名称）：\n"
+        f"{meme_list}\n\n"
+        "只输出符合给定 JSON schema 的结果，不要多余文字。"
+    )
 
 
 def _detect_mime(image_b64: str) -> str:
@@ -77,7 +87,7 @@ def understand(state: MemeState) -> dict:
     resp = client.chat.completions.create(
         model=cfg.model,
         messages=[
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": _build_system_prompt()},
             {"role": "user", "content": content},
         ],
         response_format={

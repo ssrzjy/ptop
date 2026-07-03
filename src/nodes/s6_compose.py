@@ -46,24 +46,11 @@ def _draw_text(draw: ImageDraw.ImageDraw, text: str, y: int, w: int, font) -> No
                   fill="white", stroke_width=3, stroke_fill="black")
 
 
-def _random_template_id() -> str:
-    """从 templates/ 随机取一张底图的 id（不含扩展名）；目录为空则返回空字符串。"""
-    if not os.path.isdir(TEMPLATES_DIR):
-        return ""
-    files = [f for f in os.listdir(TEMPLATES_DIR) if not f.startswith(".")]
-    if not files:
-        return ""
-    import random
-    return os.path.splitext(random.choice(files))[0]
-
-
 def compose(state: MemeState) -> dict:
-    # captions 现在由 S1 单次调用直接生成，存在 context 里
     context = state.get("context") or {}
     captions = context.get("captions", [])
-    pua_type = context.get("pua_type", "unknown")
+    template_id = context.get("template_id", "")
 
-    template_id = _random_template_id() or pua_type
     img = _load_template(template_id)
     w, h = img.size
     draw = ImageDraw.Draw(img)
