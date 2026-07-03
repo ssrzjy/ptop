@@ -10,12 +10,10 @@ from src.state import MemeState
 
 
 def input_safety(state: MemeState) -> dict:
-    context = state.get("context") or {}
-    # TODO: 真实的越界判定(违法/未成年/极端等)
-    blocked = False
-    reason = None
+    # blocked 已由 S1 在单次调用中判断并写入 state，此处直接透传
+    blocked = state.get("blocked", False)
     return {
-        "safety": {"is_negative": True, "blocked": blocked, "reason": reason},
+        "safety": {"blocked": blocked},
         "blocked": blocked,
         "status": "blocked" if blocked else "running",
     }

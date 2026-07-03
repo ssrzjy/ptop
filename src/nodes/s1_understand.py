@@ -1,11 +1,9 @@
-"""S1 视觉理解 —— 整条流程最关键的一步。
+"""S1 视觉理解 + 文案生成 —— 合并为单次模型调用。
 
-用 Claude Opus 4.8(高分辨率视觉)看懂截图:对话双方、角色、语气、
-潜台词、情绪、PUA 类型。用 structured output 强制输出 Context JSON。
-
-打磨方向:把下面的桩替换为真实的 client.messages.create 调用,
-schema 用 CONTEXT_SCHEMA 约束。可以顺带在同一次调用里输出 safety 字段,
-省掉 S2 的一次模型调用。
+一次调用完成：
+  1. 看懂截图，识别 pua_type
+  2. 直接生成贴到梗图上的 captions（top/bottom，≤15字）
+  3. 判断是否越界（blocked），省掉单独的安全节点调用
 """
 
 import json
@@ -15,53 +13,40 @@ from src.state import MemeState
 from src.config import get_model
 from src.llm import get_client
 
-# Context JSON 的结构契约(structured output 的 schema 基础)
-CONTEXT_SCHEMA = {
+COMBINED_SCHEMA = {
     "type": "object",
     "properties": {
-        "participants": {
+        "pua_type": {"type": "string"},   # "职场PUA" / "情感PUA" / "道德绑架" / "无"
+        "blocked": {"type": "boolean"},   # 违法/极端内容时为 true
+        "captions": {
             "type": "array",
             "items": {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "string"},
-                    "role": {"type": "string"},  # "对方" / "我"
+                    "slot": {"type": "string"},   # "top" / "bottom"
+                    "text": {"type": "string"},   # ≤15字
                 },
-                "required": ["id", "role"],
+                "required": ["slot", "text"],
                 "additionalProperties": False,
             },
         },
-        "dialogue": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "speaker": {"type": "string"},
-                    "text": {"type": "string"},
-                    "tone": {"type": "string"},
-                },
-                "required": ["speaker", "text", "tone"],
-                "additionalProperties": False,
-            },
-        },
-        "subtext": {"type": "string"},
-        "emotion": {"type": "string"},
-        "pua_type": {"type": "string"},
     },
-    "required": ["participants", "dialogue", "subtext", "emotion", "pua_type"],
+    "required": ["pua_type", "blocked", "captions"],
     "additionalProperties": False,
 }
 
-
 SYSTEM_PROMPT = (
-    "你是分析聊天截图的助手。看懂截图里的对话:谁在说话、说了什么、语气、"
-    "潜台词、情绪,以及对方是否在 PUA(职场PUA/情感PUA/道德绑架 等)。"
-    "只输出符合给定 JSON schema 的结果,不要多余文字。"
+    "你是分析聊天截图并生成反PUA梗图文案的助手。\n"
+    "1. 看懂截图，识别是否存在PUA/职场压迫/道德绑架等行为，填写 pua_type。\n"
+    "2. 若内容涉及违法/未成年人/极端暴力，设 blocked=true，captions 留空数组。\n"
+    "3. 否则生成两条梗图文案（每条≤15字，简短有力）：\n"
+    "   - slot=top：概括对方的问题行为\n"
+    "   - slot=bottom：机智的回怼\n"
+    "只输出符合给定 JSON schema 的结果，不要多余文字。"
 )
 
 
 def _detect_mime(image_b64: str) -> str:
-    """从 base64 首字节探测图片类型,不依赖文件后缀。"""
     head = base64.b64decode(image_b64[:16])
     if head.startswith(b"\xff\xd8\xff"):
         return "image/jpeg"
@@ -71,16 +56,16 @@ def _detect_mime(image_b64: str) -> str:
         return "image/webp"
     if head.startswith((b"GIF87a", b"GIF89a")):
         return "image/gif"
-    return "image/png"  # 兜底
+    return "image/png"
 
 
 def understand(state: MemeState) -> dict:
-    cfg = get_model("s1_understand")  # 本阶段用哪个模型,由 config.py 决定
+    cfg = get_model("s1_understand")
     client = get_client(cfg)
 
     image_b64 = state.get("image_b64", "")
     content = [
-        {"type": "text", "text": "分析这张聊天截图,按 schema 输出 Context JSON。"},
+        {"type": "text", "text": "分析这张聊天截图，按 schema 输出结果。"},
     ]
     if image_b64:
         mime = _detect_mime(image_b64)
@@ -97,8 +82,8 @@ def understand(state: MemeState) -> dict:
         ],
         response_format={
             "type": "json_schema",
-            "json_schema": {"name": "context", "schema": CONTEXT_SCHEMA},
+            "json_schema": {"name": "context", "schema": COMBINED_SCHEMA},
         },
     )
     context = json.loads(resp.choices[0].message.content)
-    return {"context": context}
+    return {"context": context, "blocked": context.get("blocked", False)}

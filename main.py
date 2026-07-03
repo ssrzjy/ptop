@@ -6,6 +6,7 @@
 """
 
 import sys
+import time
 import base64
 
 from src.graph import app
@@ -22,13 +23,20 @@ def main() -> None:
     initial: dict = {"image_b64": image_b64}
     config = {"configurable": {"thread_id": "demo-1"}}  # checkpointer 需要
 
+    total_start = time.time()
     print("=== 开始 ===")
+
+    node_start = total_start
     for step in app.stream(initial, config=config):
         for node_name, partial in step.items():
-            print(f"[{node_name}] -> {partial}")
+            now = time.time()
+            elapsed = now - node_start
+            print(f"[{node_name}] {elapsed*1000:.0f}ms -> {partial}")
+            node_start = now
 
+    total_elapsed = time.time() - total_start
     final = app.get_state(config).values
-    print("=== 结束 ===")
+    print(f"=== 结束 (总耗时 {total_elapsed:.2f}s) ===")
     print("status:", final.get("status"))
     print("blocked:", final.get("blocked"))
     print("final_image:", final.get("final_image"))
