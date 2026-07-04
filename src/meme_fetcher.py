@@ -12,18 +12,20 @@ import json
 import httpx
 
 META_PATH = "meta.json"
-TEMPLATES_DIR = "templates"
+GIF_META_PATH = "gif.json"
+TEMPLATES_BASE = "templates"
 
 
-def _load_meta() -> list[dict]:
-    with open(META_PATH, encoding="utf-8") as f:
+def _load_meta(media_type: str = "img") -> list[dict]:
+    path = GIF_META_PATH if media_type == "gif" else META_PATH
+    with open(path, encoding="utf-8") as f:
         data = json.load(f)
     return data["data"]["memes"]
 
 
-def meme_list_for_prompt() -> str:
+def meme_list_for_prompt(media_type: str = "img") -> str:
     """返回注入 prompt 的梗图列表，格式：每行 'id|name'。"""
-    return "\n".join(f"{m['id']}|{m['name']}" for m in _load_meta())
+    return "\n".join(f"{m['id']}|{m['name']}" for m in _load_meta(media_type))
 
 
 def _fix_proxy(url: str) -> str:
@@ -45,18 +47,17 @@ def _make_client() -> httpx.Client:
     return httpx.Client(timeout=15)
 
 
-def ensure_template(template_id: str, url: str) -> str:
+def ensure_template(template_id: str, url: str, media_type: str = "img") -> str:
     """确保模板图片在本地缓存，返回本地路径。有缓存直接返回，没有则下载。"""
-    os.makedirs(TEMPLATES_DIR, exist_ok=True)
+    d = os.path.join(TEMPLATES_BASE, media_type)
+    os.makedirs(d, exist_ok=True)
 
-    # 命中本地缓存（任意扩展名）
-    cached = glob.glob(os.path.join(TEMPLATES_DIR, f"{template_id}.*"))
+    cached = glob.glob(os.path.join(d, f"{template_id}.*"))
     if cached:
         return cached[0]
 
-    # 下载
     ext = os.path.splitext(url)[-1] or ".jpg"
-    local_path = os.path.join(TEMPLATES_DIR, f"{template_id}{ext}")
+    local_path = os.path.join(d, f"{template_id}{ext}")
     with _make_client() as client:
         resp = client.get(url)
         resp.raise_for_status()

@@ -13,16 +13,17 @@ from src.state import MemeState
 from src.config import get_model
 from src.llm import get_client
 
-TEMPLATES_DIR = "templates"
+TEMPLATES_BASE = "templates"
 
 
-def _available_templates() -> list[str]:
-    """读 templates/ 目录，返回不含扩展名的 id 列表，如 ['1', '2', '3']。"""
-    if not os.path.isdir(TEMPLATES_DIR):
+def _available_templates(media_type: str = "img") -> list[str]:
+    """读 templates/<media_type>/ 目录，返回不含扩展名的 id 列表。"""
+    d = os.path.join(TEMPLATES_BASE, media_type)
+    if not os.path.isdir(d):
         return []
     return [
         os.path.splitext(f)[0]
-        for f in sorted(os.listdir(TEMPLATES_DIR))
+        for f in sorted(os.listdir(d))
         if not f.startswith(".")
     ]
 
@@ -63,7 +64,8 @@ def generate(state: MemeState) -> dict:
     cfg = get_model("s4_generate")  # 本阶段用哪个模型,可与 S1 不同
     client = get_client(cfg)
 
-    templates = _available_templates()
+    media_type = state.get("media_type", "img")
+    templates = _available_templates(media_type)
     template_hint = (
         f"可用模板 id(必须从中选一个):{templates}\n" if templates else ""
     )

@@ -30,6 +30,7 @@ class MemeState(TypedDict, total=False):
     blocked: bool                  # 是否被安全拦截
     retry_count: int               # S5→S4 重写计数,防死循环
     status: Literal["running", "blocked", "done"]
+    media_type: Literal["img", "gif"]  # 底图来源子目录
 
 
 MAX_REWRITE = 2  # S5 不合规时回 S4 重写的最大次数

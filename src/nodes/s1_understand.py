@@ -38,8 +38,8 @@ COMBINED_SCHEMA = {
 }
 
 
-def _build_system_prompt() -> str:
-    meme_list = meme_list_for_prompt()
+def _build_system_prompt(media_type: str = "img") -> str:
+    meme_list = meme_list_for_prompt(media_type)
     return (
         "你是分析聊天截图并生成反PUA梗图文案的助手。\n"
         "1. 看懂截图，识别是否存在PUA/职场压迫/道德绑架等行为，填写 pua_type。\n"
@@ -72,6 +72,7 @@ def _detect_mime(image_b64: str) -> str:
 def understand(state: MemeState) -> dict:
     cfg = get_model("s1_understand")
     client = get_client(cfg)
+    media_type = state.get("media_type", "img")
 
     image_b64 = state.get("image_b64", "")
     content = [
@@ -87,7 +88,7 @@ def understand(state: MemeState) -> dict:
     resp = client.chat.completions.create(
         model=cfg.model,
         messages=[
-            {"role": "system", "content": _build_system_prompt()},
+            {"role": "system", "content": _build_system_prompt(media_type)},
             {"role": "user", "content": content},
         ],
         response_format={
@@ -95,5 +96,32 @@ def understand(state: MemeState) -> dict:
             "json_schema": {"name": "context", "schema": COMBINED_SCHEMA},
         },
     )
-    context = json.loads(resp.choices[0].message.content)
+
+    choice = resp.choices[0]
+    raw = choice.message.content or ""
+    print(f"  [S1] finish_reason={choice.finish_reason} content_len={len(raw)}")
+
+    if not raw.strip():
+        print(f"  [S1] 模型返回空内容，按 blocked 处理")
+        return {
+            "context": {"pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
+            "blocked": True,
+        }
+
+    # 剥掉模型可能包裹的 markdown fence（```json ... ```）
+    stripped = raw.strip()
+    if stripped.startswith("```"):
+        lines = stripped.splitlines()
+        end = -1 if lines[-1].strip() == "```" else len(lines)
+        stripped = "\n".join(lines[1:end])
+
+    try:
+        context = json.loads(stripped)
+    except Exception as e:
+        print(f"  [S1] JSON 解析失败：{e}")
+        return {
+            "context": {"pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
+            "blocked": True,
+        }
+
     return {"context": context, "blocked": context.get("blocked", False)}
