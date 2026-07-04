@@ -1,0 +1,12 @@
+.git/
+.venv/
+__pycache__/
+*.pyc
+.env
+output/
+.DS_Store
+input_case/
+scripts/
+*.md
+todo.txt
+download_gifs.py
