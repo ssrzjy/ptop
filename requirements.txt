@@ -1,5 +1,13 @@
 langgraph>=0.2
-anthropic>=0.40
 pillow>=10.0
 python-dotenv>=1.0
 openai>=1.0
+httpx>=0.27
+
+# 图像/视频合成(容器用 headless,不依赖 libGL)
+opencv-python-headless>=4.8
+numpy>=1.24
+
+# HTTP 服务
+fastapi>=0.110
+uvicorn[standard]>=0.29

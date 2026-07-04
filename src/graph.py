@@ -26,7 +26,14 @@ def route_after_s2(state: MemeState) -> str:
     return "blocked" if state.get("blocked") else "ok"
 
 
-def build_graph(*, interrupt_for_role_fix: bool = False):
+def build_graph(*, interrupt_for_role_fix: bool = False, use_checkpointer: bool = True):
+    """编排并编译图。
+
+    use_checkpointer:
+      True  —— 挂 MemorySaver,支持 interrupt/resume 人机回环(CLI/调试用)。
+      False —— 无 checkpointer,单次 invoke 即出结果,不按 thread_id 留存状态。
+               服务化时用它,避免长跑进程内存随请求数无限增长。
+    """
     g = StateGraph(MemeState)
 
     g.add_node("preprocess", preprocess)     # S0
@@ -45,10 +52,11 @@ def build_graph(*, interrupt_for_role_fix: bool = False):
 
     g.add_edge("compose", END)
 
-    checkpointer = MemorySaver()
     interrupt_after = ["understand"] if interrupt_for_role_fix else []
-    return g.compile(checkpointer=checkpointer, interrupt_after=interrupt_after)
+    if use_checkpointer:
+        return g.compile(checkpointer=MemorySaver(), interrupt_after=interrupt_after)
+    return g.compile(interrupt_after=interrupt_after)
 
 
-# 默认导出一个编译好的 app
+# 默认导出一个编译好的 app(带 checkpointer,供 CLI/调试)
 app = build_graph()

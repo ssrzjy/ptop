@@ -12,7 +12,7 @@ class MemeState(TypedDict, total=False):
     image_b64: str                 # 脱敏 + 标准化后的截图(base64)
 
     # --- S1 产出:Context JSON(理解结果) ---
-    context: Optional[dict]        # {participants, dialogue, subtext, emotion, pua_type}
+    context: Optional[dict]        # {tag, pua_type, blocked, template_id, captions} —— tag 为图片主题标签
 
     # --- S2 / S5 产出:安全判定 ---
     safety: Optional[dict]         # {is_negative, blocked, reason}

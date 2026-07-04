@@ -17,6 +17,7 @@ from src.meme_fetcher import meme_list_for_prompt
 COMBINED_SCHEMA = {
     "type": "object",
     "properties": {
+        "tag": {"type": "string"},         # 图片主题标签,模型自由概括,如 "职场加班" / "情感冷暴力" / "催婚"
         "pua_type": {"type": "string"},    # "职场PUA" / "情感PUA" / "道德绑架" / "无"
         "blocked": {"type": "boolean"},    # 违法/极端内容时为 true
         "template_id": {"type": "string"}, # 从梗图列表中选一个 id
@@ -33,7 +34,7 @@ COMBINED_SCHEMA = {
             },
         },
     },
-    "required": ["pua_type", "blocked", "template_id", "captions"],
+    "required": ["tag", "pua_type", "blocked", "template_id", "captions"],
     "additionalProperties": False,
 }
 
@@ -42,6 +43,7 @@ def _build_system_prompt(media_type: str = "img") -> str:
     meme_list = meme_list_for_prompt(media_type)
     return (
         "你是分析聊天截图并生成反PUA梗图文案的助手。\n"
+        "0. 用一个简短词概括这张图的主题场景（如\"职场加班\"/\"情感冷暴力\"/\"催婚\"），填入 tag。\n"
         "1. 看懂截图，识别是否存在PUA/职场压迫/道德绑架等行为，填写 pua_type。\n"
         "2. 若内容涉及违法/未成年人/极端暴力，设 blocked=true，template_id 和 captions 留空。\n"
         "3. 否则：\n"
@@ -104,7 +106,7 @@ def understand(state: MemeState) -> dict:
     if not raw.strip():
         print(f"  [S1] 模型返回空内容，按 blocked 处理")
         return {
-            "context": {"pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
+            "context": {"tag": "", "pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
             "blocked": True,
         }
 
@@ -120,7 +122,7 @@ def understand(state: MemeState) -> dict:
     except Exception as e:
         print(f"  [S1] JSON 解析失败：{e}")
         return {
-            "context": {"pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
+            "context": {"tag": "", "pua_type": "unknown", "blocked": True, "template_id": "", "captions": []},
             "blocked": True,
         }
 
