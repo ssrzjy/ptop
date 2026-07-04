@@ -18,13 +18,19 @@ def fix_proxy(url: str) -> str:
     return url
 
 
+# 分离超时：连接 15s，单次读取 60s（大文件按分块读取，每块不超时即可），
+# 写入 15s，连接池等待 15s。比单一 timeout=20 更适合 gif/mp4。
+TIMEOUT = httpx.Timeout(connect=15.0, read=60.0, write=15.0, pool=15.0)
+MAX_RETRIES = 3
+
+
 def make_client() -> httpx.Client:
     proxy = os.environ.get("ALL_PROXY") or os.environ.get("all_proxy") or ""
     if proxy:
         proxy = fix_proxy(proxy)
         print(f"使用代理: {proxy}")
-        return httpx.Client(proxy=proxy, timeout=20)
-    return httpx.Client(timeout=20)
+        return httpx.Client(proxy=proxy, timeout=TIMEOUT, follow_redirects=True)
+    return httpx.Client(timeout=TIMEOUT, follow_redirects=True)
 
 
 def main() -> None:
@@ -49,16 +55,41 @@ def main() -> None:
                 skip += 1
                 continue
 
-            try:
-                resp = client.get(url)
-                resp.raise_for_status()
-                with open(dest, "wb") as f:
-                    f.write(resp.content)
-                size_kb = len(resp.content) // 1024
-                print(f"[{i}/{total}] ✓ {mid} {name} ({size_kb}KB)")
-                ok += 1
-            except Exception as e:
-                print(f"[{i}/{total}] ✗ {mid} {name} — {e}", file=sys.stderr)
+            tmp = dest + ".part"
+            success = False
+            for attempt in range(1, MAX_RETRIES + 1):
+                try:
+                    # 流式下载：分块写入，避免大文件一次性载入内存，
+                    # 也避免整体读取撞上超时。
+                    size = 0
+                    with client.stream("GET", url) as resp:
+                        resp.raise_for_status()
+                        with open(tmp, "wb") as f:
+                            for chunk in resp.iter_bytes(chunk_size=65536):
+                                f.write(chunk)
+                                size += len(chunk)
+                    os.replace(tmp, dest)  # 下载完整后才落到最终文件名
+                    print(f"[{i}/{total}] ✓ {mid} {name} ({size // 1024}KB)")
+                    ok += 1
+                    success = True
+                    break
+                except Exception as e:
+                    if os.path.exists(tmp):
+                        os.remove(tmp)
+                    if attempt < MAX_RETRIES:
+                        wait = 2 ** attempt  # 退避：2s, 4s
+                        print(
+                            f"[{i}/{total}] ⚠ {mid} {name} 第{attempt}次失败，"
+                            f"{wait}s 后重试 — {e}",
+                            file=sys.stderr,
+                        )
+                        time.sleep(wait)
+                    else:
+                        print(
+                            f"[{i}/{total}] ✗ {mid} {name} 重试{MAX_RETRIES}次仍失败 — {e}",
+                            file=sys.stderr,
+                        )
+            if not success:
                 fail += 1
 
             time.sleep(0.1)

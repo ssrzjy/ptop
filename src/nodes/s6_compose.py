@@ -15,10 +15,20 @@ from src.state import MemeState
 
 OUTPUT_DIR = "output"
 TEMPLATES_BASE = "templates"
-FONT_PATH = os.environ.get(
-    "MEME_FONT",
-    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-)
+# 中文字体候选：按顺序取第一个存在的。可用 MEME_FONT 环境变量覆盖。
+# 覆盖 macOS / Linux 常见的支持中日韩的字体，避免 fallback 到不支持中文的
+# load_default()（那会导致中文渲染成乱码/方块）。
+FONT_CANDIDATES = [
+    os.environ.get("MEME_FONT", ""),
+    "/System/Library/Fonts/PingFang.ttc",              # macOS 苹方
+    "/System/Library/Fonts/STHeiti Medium.ttc",        # macOS 黑体
+    "/System/Library/Fonts/Hiragino Sans GB.ttc",      # macOS 冬青黑
+    "/Library/Fonts/Arial Unicode.ttf",                # macOS 全字符集
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",  # Linux Noto
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",    # Linux 文泉驿
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", # Linux 兜底(无中文)
+]
+FONT_PATH = next((p for p in FONT_CANDIDATES if p and os.path.exists(p)), None)
 
 GIF_MAX_WIDTH = 480   # 输出 gif 最大宽度，超出等比缩小
 GIF_MAX_FPS   = 12    # 输出 gif 最高帧率，超出则跳帧
@@ -26,12 +36,88 @@ TEXT_MARGIN_RATIO = 0.045
 TEXT_BAND_RATIO = 0.22
 TEXT_MIN_FONT_SIZE = 12
 
+# —— 文字自适应排版参数（方案 C）——
+TEXT_WIDTH_RATIO   = 0.92  # 文字最大占图宽比例，两侧各留白
+SLOT_HEIGHT_RATIO  = 0.34  # 单个 slot（top/bottom）文字块最大占图高比例
+FONT_MAX_RATIO     = 0.14  # 初始字号 = 图高 * 此比例（上限）
+FONT_MIN_SIZE      = 14    # 字号下限，再小就没法看了
+LINE_SPACING       = 8     # 行间额外像素
+
+
+def _wrap_by_pixel(draw, text: str, font, max_w: float) -> list[str]:
+    """按实际像素宽度折行：逐字符累加，超过 max_w 就换行。
+    中英文混排都准，不再依赖固定字符数。
+    """
+    lines: list[str] = []
+    cur = ""
+    for ch in text:
+        if ch == "\n":
+            lines.append(cur)
+            cur = ""
+            continue
+        trial = cur + ch
+        if draw.textlength(trial, font=font) <= max_w or not cur:
+            cur = trial
+        else:
+            lines.append(cur)
+            cur = ch
+    if cur:
+        lines.append(cur)
+    return lines or [""]
+
+
+def _fit_text(draw, text: str, w: int, h: int) -> tuple[ImageFont.FreeTypeFont, list[str]]:
+    """自适应求解：从大到小试字号，直到折行后的文字块
+    宽度 <= 可用宽、总高 <= 单 slot 可用高。返回 (font, 折好的行)。
+    """
+    max_w = w * TEXT_WIDTH_RATIO
+    max_h = h * SLOT_HEIGHT_RATIO
+    size = max(FONT_MIN_SIZE, int(h * FONT_MAX_RATIO))
+
+    while size >= FONT_MIN_SIZE:
+        font = _load_font(size)
+        lines = _wrap_by_pixel(draw, text, font, max_w)
+        line_h = size + LINE_SPACING
+        block_h = line_h * len(lines)
+        widest = max((draw.textlength(ln, font=font) for ln in lines), default=0)
+        if widest <= max_w and block_h <= max_h:
+            return font, lines
+        size -= 2  # 收敛步长
+
+    # 触底：用最小字号，尽力而为
+    font = _load_font(FONT_MIN_SIZE)
+    return font, _wrap_by_pixel(draw, text, font, max_w)
+
+
+def _draw_caption(draw, text: str, w: int, h: int, slot: str) -> None:
+    """在指定 slot（top/bottom）绘制一条自适应文字，居中、带描边。"""
+    if not text:
+        return
+    font, lines = _fit_text(draw, text, w, h)
+    line_h = font.size + LINE_SPACING
+    block_h = line_h * len(lines)
+    # 描边宽度随字号缩放，小字号不至于被粗描边糊死
+    stroke = max(1, font.size // 12)
+
+    if slot == "bottom":
+        y0 = h - block_h - int(h * 0.04)  # 底部略留边距
+    else:
+        y0 = int(h * 0.04)                # 顶部略留边距
+
+    for i, line in enumerate(lines):
+        line_w = draw.textlength(line, font=font)
+        x = (w - line_w) / 2
+        draw.text((x, y0 + i * line_h), line, font=font,
+                  fill="white", stroke_width=stroke, stroke_fill="black")
+
 
 def _load_font(size: int) -> ImageFont.FreeTypeFont:
-    try:
-        return ImageFont.truetype(FONT_PATH, size)
-    except OSError:
-        return ImageFont.load_default()
+    if FONT_PATH:
+        try:
+            return ImageFont.truetype(FONT_PATH, size)
+        except OSError:
+            pass
+    return ImageFont.load_default()
 
 
 def _find_template_path(template_id: str, media_type: str) -> str | None:
